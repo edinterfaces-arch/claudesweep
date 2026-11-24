@@ -44,6 +44,7 @@ struct MainView: View {
     @State private var page: Page? = .files
     @State private var reviewFiles = false
     @State private var reviewKeys = false
+    @State private var scanScopeExpanded = true
     private let accent = Color(red: 0.68, green: 0.33, blue: 0.20)
 
     var body: some View {
@@ -120,6 +121,8 @@ struct MainView: View {
                         Spacer()
                         Button("Add Code profile…") { model.addProfile() }.disabled(model.busy)
                     }.padding(20).background(.background, in: RoundedRectangle(cornerRadius: 12))
+                    scanScope
+                    CleanupResults(title: "Last file cleanup", outcomes: model.fileOutcomes, date: model.fileCleanupDate)
                     if !model.didScan {
                         notice("Start with a scan", "Checks known locations in your home folder and the Claude app bundle. It does not inspect message contents or change files.", "magnifyingglass")
                     } else if model.inventory.files.isEmpty {
@@ -164,6 +167,29 @@ struct MainView: View {
         }
     }
 
+    private var scanScope: some View {
+        DisclosureGroup("What the file scan checks", isExpanded: $scanScopeExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Types are inferred from known paths. File and conversation contents are not opened, except for the limited settings-name check below.")
+                    .font(.caption).foregroundStyle(.secondary)
+                scopeRow("Desktop profile", "Sign-in state, extensions and local work", "~/Library/Application Support/Claude")
+                scopeRow("Code profiles", "History, settings, skills and local credentials", "~/.claude · ~/.claude.json · added profile folders")
+                scopeRow("Caches, logs & desktop state", "Generated files, cookies, preferences and recent-document references", "Known Claude paths in ~/Library/Caches, Logs, HTTPStorages, Preferences, Saved Application State and Application Support")
+                scopeRow("Application", "Installed Claude app bundles", "~/Applications/Claude.app · /Applications/Claude.app")
+                scopeRow("Settings references — read only", "Looks for configuration variable names; values are not shown", "Common shell startup files and Claude / VS Code / Cursor / VSCodium settings; up to 1 MiB per file")
+                Text("Keychain is inspected separately. Browser data and cloud records are not scanned. Only found file targets appear below; inaccessible paths are listed under locations needing attention.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(.top, 10)
+        }.padding(16).background(.background, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func scopeRow(_ title: String, _ data: String, _ location: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title + " · " + data).font(.caption.weight(.medium))
+            Text(location).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+    }
+
     private func fileRow(_ item: Candidate) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Toggle("Select \(item.title)", isOn: Binding(get: { model.selectedFiles.contains(item.id) }, set: { value in
@@ -171,8 +197,11 @@ struct MainView: View {
             })).labelsHidden().toggleStyle(.checkbox).disabled(model.busy)
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.title).fontWeight(.medium)
+                Text("Expected data: " + item.dataKind.rawValue).font(.caption.weight(.medium))
                 Text(item.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text(shortPath(item.url)).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                Text("Cleanup effect: " + item.dataKind.impact).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(item.url.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 8) {
@@ -197,6 +226,7 @@ struct MainView: View {
                     }
                     Spacer()
                 }
+                CleanupResults(title: "Last Keychain cleanup", outcomes: model.keyOutcomes, date: model.keyCleanupDate)
                 if model.didScanKeys && model.credentials.isEmpty {
                     Text("No matching entries found in the login Keychain. Other keychains and unknown service names are not covered.").foregroundStyle(.secondary)
                 }
@@ -207,7 +237,13 @@ struct MainView: View {
                         })).labelsHidden().toggleStyle(.checkbox).disabled(model.busy)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(item.service).fontWeight(.medium).textSelection(.enabled)
-                            Text(item.account).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text("Account: " + item.account).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(item.service == "Claude Safe Storage" ? "Encryption key · Removing this can make encrypted local data unreadable." : "Credential / device key · Removing this may require signing in or pairing again.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Keychains/login.keychain-db").path)
+                                .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text("Only this selected entry is deleted; the keychain file is kept.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                     }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
@@ -266,9 +302,14 @@ struct MainView: View {
                 Spacer()
             }
             ScrollView {
-                Text(model.log.isEmpty ? "No actions yet." : model.log.joined(separator: "\n\n"))
-                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                VStack(alignment: .leading, spacing: 20) {
+                    CleanupResults(title: "Last file cleanup", outcomes: model.fileOutcomes, date: model.fileCleanupDate)
+                    CleanupResults(title: "Last Keychain cleanup", outcomes: model.keyOutcomes, date: model.keyCleanupDate)
+                    Text("Full activity log").font(.headline)
+                    Text(model.log.isEmpty ? "No actions yet." : model.log.joined(separator: "\n\n"))
+                        .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(16)
             }.background(.background, in: RoundedRectangle(cornerRadius: 10))
             Text("This report stays in memory until you export it. Trash files may still contain credentials; keep only the recovery copies you need.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -293,6 +334,57 @@ struct MainView: View {
     }
 }
 
+struct CleanupResults: View {
+    let title: String
+    let outcomes: [CleanupOutcome]
+    let date: Date?
+
+    var body: some View {
+        if !outcomes.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(title).font(.headline)
+                if let date {
+                    Text(date.formatted() + " · Results from this operation, not a fresh scan.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 16) {
+                    ForEach(CleanupState.allCases, id: \.self) { state in
+                        Label("\(outcomes.filter { $0.state == state }.count) \(state.rawValue.lowercased())", systemImage: symbol(state))
+                            .foregroundStyle(color(state)).font(.caption.weight(.medium))
+                    }
+                }
+                ForEach(outcomes) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: symbol(item.state)).foregroundStyle(color(item.state)).font(.title3)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.state.rawValue + " · " + item.title).font(.callout.weight(.medium))
+                            Text(item.location).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                            Text(item.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        }.fixedSize(horizontal: false, vertical: true)
+                    }.frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .combine)
+                }
+            }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func symbol(_ state: CleanupState) -> String {
+        switch state {
+        case .completed: return "checkmark.circle.fill"
+        case .skipped: return "minus.circle"
+        case .failed: return "exclamationmark.circle.fill"
+        }
+    }
+    private func color(_ state: CleanupState) -> Color {
+        switch state {
+        case .completed: return .green
+        case .skipped: return .secondary
+        case .failed: return .red
+        }
+    }
+}
+
 struct FileReview: View {
     let items: [Candidate]
     let confirm: () -> Void
@@ -308,7 +400,8 @@ struct FileReview: View {
                     ForEach(items) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.title).fontWeight(.medium)
-                            Text(shortPath(item.url)).font(.system(.caption, design: .monospaced))
+                            Text(item.url.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                            Text(item.dataKind.rawValue + " · " + item.dataKind.impact).font(.caption).foregroundStyle(.secondary)
                             Text(item.detail).font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }

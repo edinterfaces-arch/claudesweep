@@ -97,6 +97,7 @@ final class TrashIntegrationTests: NativeFixtureTests {
         XCTAssertNil(result.error, result.error ?? "")
         XCTAssertEqual(result.successfulIDs.count, 1)
         XCTAssertEqual(result.movedItems.count, 1)
+        XCTAssertEqual(result.outcomes.map(\.state), [.completed])
         XCTAssertFalse(fm.fileExists(atPath: history.path))
         let moved = try XCTUnwrap(result.movedItems.first?.trashURL)
         XCTAssertTrue(moved.path.contains("/.Trash/"), "Expected the user's real Trash: \(moved.path)")
@@ -157,6 +158,9 @@ final class TrashIntegrationTests: NativeFixtureTests {
         XCTAssertEqual(result.successfulIDs, Set([first.path]))
         XCTAssertEqual(result.movedItems.count, 1)
         XCTAssertTrue(result.lines.contains { $0.hasPrefix("STOPPED:") })
+        XCTAssertEqual(result.outcomes.map(\.state), [.completed, .failed, .skipped])
+        XCTAssertEqual(result.outcomes.map(\.targetID), [first.path, logFolder.path, third.deletingLastPathComponent().path])
+        XCTAssertTrue(result.outcomes.last?.detail.contains("earlier item failed") == true)
         XCTAssertEqual(try String(contentsOf: third), "third")
         try recover(result)
         XCTAssertEqual(try String(contentsOf: first), "first")
@@ -172,6 +176,7 @@ final class TrashIntegrationTests: NativeFixtureTests {
         XCTAssertNotNil(result.error)
         XCTAssertTrue(result.successfulIDs.isEmpty)
         XCTAssertTrue(result.movedItems.isEmpty)
+        XCTAssertEqual(result.outcomes.map(\.state), [.failed])
         XCTAssertTrue(fm.fileExists(atPath: file.path))
     }
 
@@ -184,7 +189,23 @@ final class TrashIntegrationTests: NativeFixtureTests {
         XCTAssertNotNil(result.error)
         XCTAssertTrue(result.successfulIDs.isEmpty)
         XCTAssertTrue(result.movedItems.isEmpty)
+        XCTAssertEqual(result.outcomes.map(\.state), [.skipped])
         XCTAssertEqual(try String(contentsOf: file), "keep")
+    }
+
+    func testNestedSelectionReportsNoSeparateMove() throws {
+        _ = try write(".claude/.claude.json", data: Data("nested".utf8))
+        let parent = try candidates()
+        let child = try candidates(in: home.appendingPathComponent(".claude"))
+        XCTAssertEqual(parent.count, 1)
+        XCTAssertEqual(child.count, 1)
+        let result = trash(parent + child)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(result.movedItems.count, 1)
+        XCTAssertEqual(result.outcomes.map(\.state), [.completed, .skipped])
+        XCTAssertTrue(result.outcomes.last?.detail.contains("included in the selected parent") == true)
+        try recover(result)
+        XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".claude/.claude.json")), "nested")
     }
 
     func testRecoveryDoesNotOverwriteARecreatedOriginal() throws {

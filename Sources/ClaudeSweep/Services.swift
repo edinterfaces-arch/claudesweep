@@ -166,14 +166,47 @@ struct OperationResult {
     var error: String?
     var successfulIDs: Set<String> = []
     var movedItems: [TrashedItem] = []
+    var outcomes: [CleanupOutcome] = []
+}
+
+enum CleanupState: String, CaseIterable {
+    case completed = "Completed"
+    case skipped = "Skipped"
+    case failed = "Failed"
+}
+
+struct CleanupOutcome: Identifiable {
+    let id = UUID()
+    let targetID: String
+    let title: String
+    let location: String
+    let state: CleanupState
+    let detail: String
+
+    var reportLine: String { "\(state.rawValue.uppercased()): \(title)\n  \(location)\n  \(detail)" }
 }
 
 enum FileCleaner {
     static func moveToTrash(_ candidates: [Candidate]) -> OperationResult {
         var result = OperationResult()
+        let items = Safety.outermost(candidates)
+        let outerIDs = Set(items.map(\.id))
+        func record(_ item: Candidate, _ state: CleanupState, _ detail: String) {
+            result.outcomes.append(CleanupOutcome(targetID: item.id, title: item.title,
+                location: item.url.path, state: state, detail: detail))
+        }
         do { try ProcessGuard.requireStopped() }
-        catch { result.error = error.localizedDescription; return result }
-        for candidate in Safety.outermost(candidates) {
+        catch {
+            result.error = error.localizedDescription
+            for item in candidates { record(item, .skipped, "Not attempted. " + error.localizedDescription) }
+            result.lines = result.outcomes.map(\.reportLine)
+            return result
+        }
+        for candidate in items {
+            if result.error != nil {
+                record(candidate, .skipped, "Not attempted because an earlier item failed. Review the failure and scan again.")
+                continue
+            }
             do {
                 try ProcessGuard.requireStopped()
                 try Safety.validate(candidate)
@@ -181,13 +214,50 @@ enum FileCleaner {
                 try FileManager.default.trashItem(at: candidate.url, resultingItemURL: &trashed)
                 result.successfulIDs.insert(candidate.id)
                 result.movedItems.append(TrashedItem(originalURL: candidate.url, trashURL: trashed.map { $0 as URL }))
-                result.lines.append("MOVED TO TRASH: \(candidate.url.path)\n  Trash location: \(trashed?.path ?? "Open Finder Trash")")
+                record(candidate, .completed, "Moved to Trash. Recovery location: \(trashed?.path ?? "Open Finder Trash")")
             } catch {
-                result.lines.append("STOPPED: \(candidate.url.path) — \(error.localizedDescription)")
                 result.error = error.localizedDescription
-                break // preserve a reviewable partial result; don't continue after an unexpected failure
+                record(candidate, .failed, error.localizedDescription)
+                result.lines.append("STOPPED: \(candidate.url.path) — \(error.localizedDescription)")
             }
         }
+        for candidate in candidates where !outerIDs.contains(candidate.id) {
+            let parent = items.first { Safety.isInside(candidate.url, anchor: $0.url) }
+            let moved = parent.map { result.successfulIDs.contains($0.id) } ?? false
+            record(candidate, .skipped, moved
+                ? "No separate move: included in the selected parent folder moved to Trash."
+                : "Not attempted separately: covered by a selected parent folder that was not moved.")
+        }
+        result.lines.append(contentsOf: result.outcomes.map(\.reportLine))
+        return result
+    }
+}
+
+enum CredentialCleaner {
+    static func delete(_ items: [Credential], remove: (Credential) throws -> Void = { try KeychainService.delete($0) }) -> OperationResult {
+        var result = OperationResult()
+        for item in items {
+            let state: CleanupState
+            let detail: String
+            if result.error != nil {
+                state = .skipped
+                detail = "Not attempted because an earlier credential failed. Inspect Keychain again before retrying."
+            } else {
+                do {
+                    try remove(item)
+                    result.successfulIDs.insert(item.id)
+                    state = .completed
+                    detail = "Permanently deleted from login Keychain. This cannot be recovered from Trash."
+                } catch {
+                    state = .failed
+                    detail = error.localizedDescription
+                    result.error = detail
+                }
+            }
+            result.outcomes.append(CleanupOutcome(targetID: item.id, title: item.service,
+                location: "login Keychain · Account: \(item.account)", state: state, detail: detail))
+        }
+        result.lines = result.outcomes.map(\.reportLine)
         return result
     }
 }
@@ -205,6 +275,10 @@ final class SweepModel: ObservableObject {
     @Published var message: String?
     @Published var log: [String] = []
     @Published var lastScan: Date?
+    @Published var fileOutcomes: [CleanupOutcome] = []
+    @Published var keyOutcomes: [CleanupOutcome] = []
+    @Published var fileCleanupDate: Date?
+    @Published var keyCleanupDate: Date?
 
     var chosenFiles: [Candidate] { inventory.files.filter { selectedFiles.contains($0.id) } }
     var chosenKeys: [Credential] { credentials.filter { selectedKeys.contains($0.id) } }
@@ -244,13 +318,19 @@ final class SweepModel: ObservableObject {
     func cleanFiles() {
         guard !busy, !chosenFiles.isEmpty else { return }
         let items = chosenFiles
+        fileOutcomes = []
         busy = true
         Task {
             let result = await Task.detached(priority: .userInitiated) { FileCleaner.moveToTrash(items) }.value
             log.append(contentsOf: result.lines)
             if let error = result.error { message = error; log.append("CLEANUP STOPPED: \(error)") }
-            inventory.files.removeAll { result.successfulIDs.contains($0.id) }
-            selectedFiles.subtract(result.successfulIDs)
+            fileOutcomes = result.outcomes
+            fileCleanupDate = Date()
+            let movedRoots = items.filter { result.successfulIDs.contains($0.id) }.map(\.url)
+            inventory.files.removeAll { candidate in
+                movedRoots.contains { candidate.url == $0 || Safety.isInside(candidate.url, anchor: $0) }
+            }
+            selectedFiles.formIntersection(Set(inventory.files.map(\.id)))
             busy = false
             if result.error == nil {
                 message = "Moved \(result.successfulIDs.count) items to Trash. Browser data, remaining credentials and manual checks are separate. Rescan after completing those steps."
@@ -279,24 +359,12 @@ final class SweepModel: ObservableObject {
     func deleteKeys() {
         guard !busy, !chosenKeys.isEmpty else { return }
         let items = chosenKeys
+        keyOutcomes = []
         busy = true
         Task {
-            let result = await Task.detached(priority: .userInitiated) { () -> OperationResult in
-                var result = OperationResult()
-                for item in items {
-                    do {
-                        try ProcessGuard.requireStopped()
-                        try KeychainService.delete(item)
-                        result.successfulIDs.insert(item.id)
-                        result.lines.append("DELETED KEYCHAIN ENTRY: \(item.service)")
-                    } catch {
-                        result.error = error.localizedDescription
-                        result.lines.append("KEYCHAIN RESET STOPPED: \(error.localizedDescription)")
-                        break
-                    }
-                }
-                return result
-            }.value
+            let result = await Task.detached(priority: .userInitiated) { CredentialCleaner.delete(items) }.value
+            keyOutcomes = result.outcomes
+            keyCleanupDate = Date()
             log.append(contentsOf: result.lines)
             credentials.removeAll { result.successfulIDs.contains($0.id) }
             selectedKeys.subtract(result.successfulIDs)

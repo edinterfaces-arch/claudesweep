@@ -225,6 +225,29 @@ final class KeychainIntegrationTests: NativeFixtureTests {
         XCTAssertTrue(try contains(service))
     }
 
+    func testBatchReportsActualSuccessFailureAndSkippedCredentials() throws {
+        let service = "Claude Code-credentials-fixture"
+        for account in ["first", "changed", "untouched"] { try insert(service, account: account) }
+        let rows = try readyScan(in: keychain)
+        let first = try XCTUnwrap(rows.first { $0.account == "first" })
+        var changed = try XCTUnwrap(rows.first { $0.account == "changed" })
+        let untouched = try XCTUnwrap(rows.first { $0.account == "untouched" })
+        changed = Credential(reference: changed.reference, service: changed.service,
+                             account: "mismatched", createdAt: changed.createdAt,
+                             modifiedAt: changed.modifiedAt, scannedAt: changed.scannedAt)
+        let result = CredentialCleaner.delete([first, changed, untouched]) {
+            try KeychainService.delete($0, in: self.keychain)
+        }
+        XCTAssertEqual(result.outcomes.map(\.state), [.completed, .failed, .skipped])
+        XCTAssertEqual(result.successfulIDs, Set([first.id]))
+        XCTAssertNotNil(result.error)
+        XCTAssertFalse(try contains(service, account: "first"))
+        XCTAssertTrue(try contains(service, account: "changed"))
+        XCTAssertTrue(try contains(service, account: "untouched"))
+        XCTAssertTrue(result.lines.contains { $0.hasPrefix("SKIPPED:") })
+        XCTAssertFalse(result.lines.joined().contains("DISPOSABLE-INTEGRATION-SECRET"))
+    }
+
     func testLockedKeychainRefusesDeletionWithoutPrompt() throws {
         let service = "Claude Code-credentials-fixture"
         try insert(service)
