@@ -83,11 +83,48 @@ final class KeychainIntegrationTests: NativeFixtureTests {
         return true
     }
 
+    private func readyScan(in target: SecKeychain) throws -> [Credential] {
+        // The production guard requires a snapshot made at least two seconds
+        // after creation/modification because keychain dates have second precision.
+        Thread.sleep(forTimeInterval: 2.1)
+        return try KeychainService.scan(in: target)
+    }
+
+    func testFreshCredentialRequiresNewScanAfterQuietInterval() throws {
+        let service = "Claude Code-credentials-fixture"
+        try insert(service)
+        let fresh = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        XCTAssertThrowsError(try KeychainService.delete(fresh, in: keychain))
+        XCTAssertTrue(try contains(service))
+        // Waiting without rescanning must not authorize the old snapshot.
+        Thread.sleep(forTimeInterval: 2.1)
+        XCTAssertThrowsError(try KeychainService.delete(fresh, in: keychain))
+        let rescanned = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        try KeychainService.delete(rescanned, in: keychain)
+        XCTAssertFalse(try contains(service))
+    }
+
+    func testInPlaceCredentialUpdateAfterScanIsRejected() throws {
+        let service = "Claude Code-credentials-fixture"
+        try insert(service)
+        let item = try XCTUnwrap(readyScan(in: keychain).first)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecMatchSearchList as String: [keychain!],
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "synthetic-account"
+        ]
+        let changes: [String: Any] = [kSecValueData as String: Data("REPLACEMENT-SYNTHETIC-SECRET".utf8)]
+        try check(SecItemUpdate(query as CFDictionary, changes as CFDictionary))
+        XCTAssertThrowsError(try KeychainService.delete(item, in: keychain))
+        XCTAssertTrue(try contains(service))
+    }
+
     func testMetadataScanFiltersUnrelatedEntriesAndExcludesSecretValues() throws {
         try insert("Claude Code-credentials-fixture")
         try insert("Claude Safe Storage")
         try insert("Unrelated synthetic service")
-        let rows = try KeychainService.scan(in: keychain)
+        let rows = try readyScan(in: keychain)
         XCTAssertEqual(Set(rows.map(\.service)), Set(["Claude Code-credentials-fixture", "Claude Safe Storage"]))
         XCTAssertTrue(rows.allSatisfy { !$0.reference.isEmpty })
         XCTAssertFalse(String(reflecting: rows).contains("DISPOSABLE-INTEGRATION-SECRET"))
@@ -99,20 +136,21 @@ final class KeychainIntegrationTests: NativeFixtureTests {
         try insert(service, account: "selected")
         try insert(service, account: "keep")
         try insert("Unrelated synthetic service")
-        let selected = try XCTUnwrap(KeychainService.scan(in: keychain).first { $0.account == "selected" })
+        let selected = try XCTUnwrap(readyScan(in: keychain).first { $0.account == "selected" })
         try KeychainService.delete(selected, in: keychain)
         XCTAssertFalse(try contains(service, account: "selected"))
         XCTAssertTrue(try contains(service, account: "keep"))
         XCTAssertTrue(try contains("Unrelated synthetic service"))
-        XCTAssertEqual(try KeychainService.scan(in: keychain).count, 1)
+        XCTAssertEqual(try readyScan(in: keychain).count, 1)
     }
 
     func testIdentityMismatchCannotDeleteCredential() throws {
         let service = "Claude Code-credentials-fixture"
         try insert(service)
-        let original = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let original = try XCTUnwrap(readyScan(in: keychain).first)
         let wrong = Credential(reference: original.reference, service: service,
-                               account: "wrong-account", item: original.item)
+                               account: "wrong-account", createdAt: original.createdAt,
+                               modifiedAt: original.modifiedAt, scannedAt: original.scannedAt)
         XCTAssertThrowsError(try KeychainService.delete(wrong, in: keychain))
         XCTAssertTrue(try contains(service))
     }
@@ -128,10 +166,10 @@ final class KeychainIntegrationTests: NativeFixtureTests {
     func testStaleReferenceDoesNotDeleteReplacement() throws {
         let service = "Claude Code-credentials-fixture"
         try insert(service)
-        let original = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let original = try XCTUnwrap(readyScan(in: keychain).first)
         try KeychainService.delete(original, in: keychain)
         // Persistent references can legitimately be reused for identical primary
-        // attributes. The deletion must validate the original live item instead.
+        // attributes. The deletion must validate the scanned metadata instead.
         try insert(service)
         XCTAssertThrowsError(try KeychainService.delete(original, in: keychain))
         XCTAssertTrue(try contains(service))
@@ -142,7 +180,7 @@ final class KeychainIntegrationTests: NativeFixtureTests {
         let other = try makeKeychain("other")
         try insert(service)
         try insert(service, into: other)
-        let selected = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let selected = try XCTUnwrap(readyScan(in: keychain).first)
         try KeychainService.delete(selected, in: keychain)
         XCTAssertFalse(try contains(service))
         XCTAssertTrue(try contains(service, in: other))
@@ -151,7 +189,7 @@ final class KeychainIntegrationTests: NativeFixtureTests {
     func testExternalReplacementIsRejectedAfterScan() throws {
         let service = "Claude Code-credentials-fixture"
         try insert(service)
-        let original = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let original = try XCTUnwrap(readyScan(in: keychain).first)
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         // The last argument explicitly limits the command to our UUID-owned
@@ -173,7 +211,7 @@ final class KeychainIntegrationTests: NativeFixtureTests {
         let other = try makeKeychain("other")
         let service = "Claude Code-credentials-fixture"
         try insert(service, into: other)
-        let item = try XCTUnwrap(KeychainService.scan(in: other).first)
+        let item = try XCTUnwrap(readyScan(in: other).first)
         XCTAssertThrowsError(try KeychainService.delete(item, in: keychain))
         XCTAssertTrue(try contains(service, in: other))
     }
@@ -181,7 +219,7 @@ final class KeychainIntegrationTests: NativeFixtureTests {
     func testRunningClaudeBlocksCredentialDeletion() throws {
         let service = "Claude Code-credentials-fixture"
         try insert(service)
-        let item = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let item = try XCTUnwrap(readyScan(in: keychain).first)
         _ = try startSyntheticClaude()
         XCTAssertThrowsError(try KeychainService.delete(item, in: keychain))
         XCTAssertTrue(try contains(service))
@@ -190,7 +228,7 @@ final class KeychainIntegrationTests: NativeFixtureTests {
     func testLockedKeychainRefusesDeletionWithoutPrompt() throws {
         let service = "Claude Code-credentials-fixture"
         try insert(service)
-        let item = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let item = try XCTUnwrap(readyScan(in: keychain).first)
         try check(SecKeychainLock(keychain))
         XCTAssertThrowsError(try KeychainService.delete(item, in: keychain))
         try check(disposablePassword.withUnsafeBytes {

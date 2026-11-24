@@ -7,9 +7,11 @@ struct Credential: Identifiable {
     let reference: Data
     let service: String
     let account: String
-    // Retain the exact live item from the scan. A file-based keychain can reuse
-    // a persistent reference when an item with the same attributes is recreated.
-    var item: SecKeychainItem? = nil
+    // File-based keychains can reuse both persistent and live references.
+    // Metadata snapshots plus a quiet interval reject recently replaced entries.
+    var createdAt: Date? = nil
+    var modifiedAt: Date? = nil
+    var scannedAt: Date = Date()
     var id: String { reference.base64EncodedString() }
 }
 
@@ -65,13 +67,13 @@ enum KeychainService {
     // The app always uses loginKeychain(). Integration tests supply a disposable
     // keychain so they exercise these same SecItem operations without real secrets.
     static func scan(in keychain: SecKeychain) throws -> [Credential] {
+        let scannedAt = Date()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecMatchSearchList as String: [keychain],
             kSecMatchLimit as String: kSecMatchLimitAll,
             kSecReturnAttributes as String: true,
             kSecReturnPersistentRef as String: true,
-            kSecReturnRef as String: true,
             kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail
         ]
         var result: CFTypeRef?
@@ -84,12 +86,12 @@ enum KeychainService {
         return rows.compactMap { row in
             guard let service = row[kSecAttrService as String] as? String,
                   Safety.allowedKeychainService(service),
-                  let reference = row[kSecValuePersistentRef as String] as? Data,
-                  let value = row[kSecValueRef as String],
-                  CFGetTypeID(value as CFTypeRef) == SecKeychainItemGetTypeID() else { return nil }
+                  let reference = row[kSecValuePersistentRef as String] as? Data else { return nil }
             return Credential(reference: reference, service: service,
                               account: row[kSecAttrAccount as String] as? String ?? "Unnamed account",
-                              item: (value as! SecKeychainItem))
+                              createdAt: row[kSecAttrCreationDate as String] as? Date,
+                              modifiedAt: row[kSecAttrModificationDate as String] as? Date,
+                              scannedAt: scannedAt)
         }.sorted { $0.service < $1.service }
     }
 
@@ -108,14 +110,21 @@ enum KeychainService {
         guard keychainStatus & SecKeychainStatus(kSecUnlockStateStatus) != 0 else {
             throw SweepError.message("The keychain is locked. Unlock it in Keychain Access, then scan again.")
         }
-        guard let item = credential.item else {
-            throw SweepError.message("The original credential reference is unavailable. Scan again.")
+        guard let createdAt = credential.createdAt, let modifiedAt = credential.modifiedAt else {
+            throw SweepError.message("Cannot verify this credential's timestamps. Review it in Keychain Access.")
+        }
+        // Legacy keychain dates have one-second precision. Refuse snapshots made
+        // within two seconds of a change, so a same-second replacement cannot
+        // masquerade as the scanned generation. Waiting alone does not approve an
+        // old snapshot: the user must scan again after the quiet interval.
+        guard credential.scannedAt.timeIntervalSince(max(createdAt, modifiedAt)) >= 2 else {
+            throw SweepError.message("This credential changed just before the scan. Wait two seconds, then scan Keychain again.")
         }
         // Re-read this exact item before deletion. Never delete with a name wildcard.
         let identityQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecMatchSearchList as String: [keychain],
-            kSecMatchItemList as String: [item],
+            kSecMatchItemList as String: [credential.reference],
             kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -124,13 +133,17 @@ enum KeychainService {
         guard status == errSecSuccess else { throw error(status) }
         guard let row = result as? [String: Any],
               row[kSecAttrService as String] as? String == credential.service,
-              (row[kSecAttrAccount as String] as? String ?? "Unnamed account") == credential.account else {
+              (row[kSecAttrAccount as String] as? String ?? "Unnamed account") == credential.account,
+              row[kSecAttrCreationDate as String] as? Date == createdAt,
+              row[kSecAttrModificationDate as String] as? Date == modifiedAt else {
             throw SweepError.message("Credential changed after the scan. Scan again.")
         }
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecMatchSearchList as String: [keychain],
-            kSecMatchItemList as String: [item]
+            kSecMatchItemList as String: [credential.reference],
+            kSecAttrCreationDate as String: createdAt,
+            kSecAttrModificationDate as String: modifiedAt
         ]
         let deletion = SecItemDelete(deleteQuery as CFDictionary)
         guard deletion == errSecSuccess else { throw error(deletion) }
