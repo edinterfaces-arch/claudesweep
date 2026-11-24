@@ -14,6 +14,8 @@ jobs:
         env:
           SWEEP_NO_REVEAL: "1"
         run: bash Package-DMG.command
+      - name: Verify DMG installation and app launch
+        run: bash scripts/verify-dmg.sh dist/*.dmg
       - name: Upload DMG and checksum
         uses: actions/upload-artifact@v4
         with:
