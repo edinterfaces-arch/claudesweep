@@ -2,7 +2,11 @@
 
 A native macOS utility for reviewing and cleaning known local Claude Desktop and Claude Code data. SwiftUI, Foundation and Security.framework; no third-party packages, network requests, analytics, root helper or automatic startup.
 
-**Status: source prototype. Authored on Linux; not compiled or run on macOS in the authoring environment.** Syntax and packaging checks are recorded in VALIDATION.md. Native build, Keychain access and Finder Trash behavior need validation on a Mac before release. This package is not a signed/notarized installer.
+**Status: experimental native macOS build.** Apple Silicon compilation, all 14 core tests, DMG creation/mounting, copied-app signature verification and a five-second startup check passed on macOS 26 in GitHub Actions on 24 November 2026. Real cleanup, Keychain operations and UI interaction still need validation; see VALIDATION.md. The app is ad-hoc signed, without Developer ID signing or Apple notarization.
+
+## Download the built app
+
+Open the [verified build](https://github.com/edinterfaces-arch/claudesweep/actions/runs/45387891261) and download its `ClaudeSweep-macOS` artifact (GitHub sign-in may be required). Unzip it, open `ClaudeSweep-0.1.0-arm64.dmg`, and drag Claude Sweep to Applications. This build is for Apple Silicon Macs. Command Line Tools are only needed when building from source. Workflow artifacts have a limited retention period.
 
 ## Build on your Mac
 
@@ -25,9 +29,9 @@ Double-click `Package-DMG.command`, or run `bash Package-DMG.command` in this fo
 - Intel: `ClaudeSweep-0.1.0-x86_64.dmg`
 - A matching `.dmg.sha256` file records its SHA-256 checksum.
 
-Open the image, drag the app to Applications, and eject it. The build targets the Mac that runs the script; it is not a universal binary. A DMG is a container and does not add Developer ID signing or notarization. This prototype still needs native validation before use on real data.
+Open the image, drag the app to Applications, and eject it. The build targets the Mac that runs the script; it is not a universal binary. A DMG is a container and does not add Developer ID signing or notarization. This prototype still needs cleanup and Keychain testing with disposable data before use on real data.
 
-The included GitHub Actions workflow performs the same steps on a macOS runner and uploads the DMG and checksum as a workflow artifact. It has not been run; upload the complete project to a repository to use it. Set `SWEEP_NO_REVEAL=1` to suppress Finder during automated builds.
+The included GitHub Actions workflow performs the same steps on a macOS runner and uploads the DMG and checksum as a workflow artifact. The macOS 26 Apple Silicon workflow has passed, including a mounted-image installation and startup check. Set `SWEEP_NO_REVEAL=1` to suppress Finder during automated builds.
 
 ## Use
 
