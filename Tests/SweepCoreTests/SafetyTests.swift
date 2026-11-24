@@ -6,8 +6,11 @@ final class SafetyTests: XCTestCase {
     private var home: URL!
 
     override func setUpWithError() throws {
-        // Resolve /var -> /private/var on macOS before testing the no-symlink policy.
-        fixture = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        // macOS may standardize /private/var back to the /var symlink even after
+        // resolving it. Keep fixtures under the runner's real home directory so
+        // the app's intentionally strict no-symlink policy stays enabled.
+        // Only the UUID-owned subtree is created or removed by these tests.
+        fixture = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("claude-sweep-tests-" + UUID().uuidString)
         home = fixture.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -33,7 +36,8 @@ final class SafetyTests: XCTestCase {
         let known = try write(".claude.json")
         let unrelated = try write("Documents/important.json", "must survive")
         let inventory = Scanner(home: home, includeSharedApplication: false).scan()
-        XCTAssertEqual(inventory.files.map(\.url), [known])
+        XCTAssertEqual(inventory.files.map(\.url), [known], inventory.warnings.joined(separator: "\n"))
+        try Safety.validate(XCTUnwrap(inventory.files.first))
         XCTAssertEqual(try String(contentsOf: unrelated), "must survive")
     }
 
