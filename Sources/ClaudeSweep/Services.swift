@@ -141,9 +141,10 @@ enum KeychainService {
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecMatchSearchList as String: [keychain],
-            kSecMatchItemList as String: [credential.reference],
-            kSecAttrCreationDate as String: createdAt,
-            kSecAttrModificationDate as String: modifiedAt
+            // The legacy backend does not support date constraints on deletion.
+            // Dates were checked immediately above. Like the file preflight,
+            // this is not an atomic lock against concurrent external changes.
+            kSecMatchItemList as String: [credential.reference]
         ]
         let deletion = SecItemDelete(deleteQuery as CFDictionary)
         guard deletion == errSecSuccess else { throw error(deletion) }
