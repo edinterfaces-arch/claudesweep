@@ -148,6 +148,27 @@ final class KeychainIntegrationTests: NativeFixtureTests {
         XCTAssertTrue(try contains(service, in: other))
     }
 
+    func testExternalReplacementIsRejectedAfterScan() throws {
+        let service = "Claude Code-credentials-fixture"
+        try insert(service)
+        let original = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        // The last argument explicitly limits the command to our UUID-owned
+        // disposable keychain. No password, login keychain or search-list query.
+        task.arguments = ["delete-generic-password", "-s", service, "-a", "synthetic-account",
+                          fixture.appendingPathComponent("isolated.keychain-db").path]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        task.standardInput = FileHandle.nullDevice
+        try task.run()
+        task.waitUntilExit()
+        XCTAssertEqual(task.terminationStatus, 0)
+        try insert(service)
+        XCTAssertThrowsError(try KeychainService.delete(original, in: keychain))
+        XCTAssertTrue(try contains(service))
+    }
+
     func testReferenceFromAnotherKeychainIsRejected() throws {
         let other = try makeKeychain("other")
         let service = "Claude Code-credentials-fixture"
