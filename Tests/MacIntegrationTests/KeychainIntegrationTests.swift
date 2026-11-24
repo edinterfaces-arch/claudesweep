@@ -109,8 +109,10 @@ final class KeychainIntegrationTests: NativeFixtureTests {
 
     func testIdentityMismatchCannotDeleteCredential() throws {
         let service = "Claude Code-credentials-fixture"
-        let reference = try insert(service)
-        let wrong = Credential(reference: reference, service: service, account: "wrong-account")
+        try insert(service)
+        let original = try XCTUnwrap(KeychainService.scan(in: keychain).first)
+        let wrong = Credential(reference: original.reference, service: service,
+                               account: "wrong-account", item: original.item)
         XCTAssertThrowsError(try KeychainService.delete(wrong, in: keychain))
         XCTAssertTrue(try contains(service))
     }
@@ -128,8 +130,9 @@ final class KeychainIntegrationTests: NativeFixtureTests {
         try insert(service)
         let original = try XCTUnwrap(KeychainService.scan(in: keychain).first)
         try KeychainService.delete(original, in: keychain)
-        let replacement = try insert(service)
-        XCTAssertNotEqual(original.reference, replacement)
+        // Persistent references can legitimately be reused for identical primary
+        // attributes. The deletion must validate the original live item instead.
+        try insert(service)
         XCTAssertThrowsError(try KeychainService.delete(original, in: keychain))
         XCTAssertTrue(try contains(service))
     }
