@@ -20,6 +20,7 @@ trap '/bin/rm -rf "$work_dir"' EXIT
 /bin/mkdir "$work_dir/staging"
 /usr/bin/ditto "$app_dir" "$work_dir/staging/Claude Sweep.app"
 /bin/ln -s /Applications "$work_dir/staging/Applications"
+/bin/cp "$PWD/УСТАНОВКА.txt" "$work_dir/staging/УСТАНОВКА.txt"
 /bin/cat > "$work_dir/staging/Read Me.txt" <<'README'
 Claude Sweep — local build
 

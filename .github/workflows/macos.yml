@@ -8,11 +8,13 @@ permissions:
 jobs:
   verify:
     runs-on: macos-26
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Test, build and package DMG
         env:
           SWEEP_NO_REVEAL: "1"
+          CLAUDESWEEP_RUN_INTEGRATION_TESTS: "1"
         run: bash Package-DMG.command
       - name: Verify DMG installation and app launch
         run: bash scripts/verify-dmg.sh dist/*.dmg

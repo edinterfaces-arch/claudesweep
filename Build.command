@@ -12,7 +12,7 @@ if ! xcrun --find swift >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Running isolated core tests…"
+echo "Running tests (native cleanup tests require CLAUDESWEEP_RUN_INTEGRATION_TESTS=1)…"
 swift test
 echo "Building the native app…"
 swift build -c release --product ClaudeSweep

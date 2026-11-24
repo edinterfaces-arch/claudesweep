@@ -8,6 +8,7 @@ let package = Package(
     targets: [
         .target(name: "SweepCore"),
         .executableTarget(name: "ClaudeSweep", dependencies: ["SweepCore"]),
-        .testTarget(name: "SweepCoreTests", dependencies: ["SweepCore"])
+        .testTarget(name: "SweepCoreTests", dependencies: ["SweepCore"]),
+        .testTarget(name: "MacIntegrationTests", dependencies: ["ClaudeSweep", "SweepCore"])
     ]
 )

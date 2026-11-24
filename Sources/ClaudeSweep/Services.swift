@@ -56,7 +56,12 @@ enum KeychainService {
     }
 
     static func scan() throws -> [Credential] {
-        let keychain = try loginKeychain()
+        try scan(in: loginKeychain())
+    }
+
+    // The app always uses loginKeychain(). Integration tests supply a disposable
+    // keychain so they exercise these same SecItem operations without real secrets.
+    static func scan(in keychain: SecKeychain) throws -> [Credential] {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecMatchSearchList as String: [keychain],
@@ -82,10 +87,14 @@ enum KeychainService {
     }
 
     static func delete(_ credential: Credential) throws {
+        try delete(credential, in: loginKeychain())
+    }
+
+    static func delete(_ credential: Credential, in keychain: SecKeychain) throws {
+        try ProcessGuard.requireStopped()
         guard Safety.allowedKeychainService(credential.service) else {
             throw SweepError.message("Credential service is outside the allowlist.")
         }
-        let keychain = try loginKeychain()
         // Re-read this exact item before deletion. Never delete with a name wildcard.
         let identityQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -117,10 +126,16 @@ enum KeychainService {
     }
 }
 
+struct TrashedItem {
+    let originalURL: URL
+    let trashURL: URL?
+}
+
 struct OperationResult {
     var lines: [String] = []
     var error: String?
     var successfulIDs: Set<String> = []
+    var movedItems: [TrashedItem] = []
 }
 
 enum FileCleaner {
@@ -135,6 +150,7 @@ enum FileCleaner {
                 var trashed: NSURL?
                 try FileManager.default.trashItem(at: candidate.url, resultingItemURL: &trashed)
                 result.successfulIDs.insert(candidate.id)
+                result.movedItems.append(TrashedItem(originalURL: candidate.url, trashURL: trashed.map { $0 as URL }))
                 result.lines.append("MOVED TO TRASH: \(candidate.url.path)\n  Trash location: \(trashed?.path ?? "Open Finder Trash")")
             } catch {
                 result.lines.append("STOPPED: \(candidate.url.path) — \(error.localizedDescription)")
