@@ -6,7 +6,7 @@ A native macOS utility for reviewing and cleaning known local Claude Desktop and
 
 ## Download the built app
 
-Open the [verified build](https://github.com/edinterfaces-arch/claudesweep/actions/runs/45469983113) and download its `ClaudeSweep-macos-15-arm64` artifact (GitHub sign-in may be required). Unzip it, open `ClaudeSweep-0.1.1-arm64.dmg`, and drag Claude Sweep to Applications. This build is for Apple Silicon Macs. Command Line Tools are only needed when building from source. Workflow artifacts have a limited retention period.
+Open the [verified build](https://github.com/edinterfaces-arch/claudesweep/actions/runs/45492022969) and download its `ClaudeSweep-macos-26-arm64` artifact (GitHub sign-in may be required). Unzip it, open `ClaudeSweep-0.1.2-arm64.dmg`, and drag Claude Sweep to Applications. This build is for Apple Silicon Macs. Command Line Tools are only needed when building from source. Workflow artifacts have a limited retention period.
 
 ## Build on your Mac
 
@@ -25,13 +25,25 @@ Alternatively, open `Package.swift` in Xcode, select the ClaudeSweep executable 
 
 Double-click `Package-DMG.command`, or run `bash Package-DMG.command` in this folder on your Mac. It runs the tests, builds and ad-hoc signs the app, then creates and verifies a compressed disk image with an Applications shortcut. Finder reveals the result in `dist`:
 
-- Apple Silicon: `ClaudeSweep-0.1.1-arm64.dmg`
-- Intel: `ClaudeSweep-0.1.1-x86_64.dmg`
+- Apple Silicon: `ClaudeSweep-0.1.2-arm64.dmg`
+- Intel: `ClaudeSweep-0.1.2-x86_64.dmg`
 - A matching `.dmg.sha256` file records its SHA-256 checksum.
 
 Open the image, drag the app to Applications, and eject it. The build targets the Mac that runs the script; it is not a universal binary. A DMG is a container and does not add Developer ID signing or notarization. Disposable-data integration tests run before CI packaging. Interactive UI and login-keychain permission prompts still require manual validation.
 
 The included GitHub Actions workflow performs the same steps on a macOS runner and uploads the DMG and checksum as a workflow artifact. The workflow tests Apple Silicon on macOS 15 and 26, including a mounted-image installation and startup check. Set `SWEEP_NO_REVEAL=1` to suppress Finder during automated builds.
+
+## Scan details and results
+
+The file page explains its scan scope before scanning. Each found target shows its full path, expected data type, description and cleanup effect. Types are inferred from known locations; conversation contents are not inspected. Keychain entries show service, account, keychain location and the consequence of deletion without revealing secrets.
+
+After an operation finishes, a result panel remains on the relevant page and in Activity:
+
+- **Completed**, with a green check: the file was moved to Trash or the selected Keychain entry was deleted.
+- **Failed**, with a red error icon: the operation returned an error; its reason is shown.
+- **Skipped**, with a neutral minus icon: no separate operation was attempted. The reason explains a blocked batch, a previous failure, or inclusion in a selected parent folder.
+
+Results describe a dated operation, not current disk state. A rescan does not erase the last result panel; a new cleanup replaces it. Activity retains the full session log, including all three states, for export. Results appear after the batch completes; the app shows a progress indicator while working. Unselected items are left unchanged and are not counted as attempted cleanup.
 
 ## Use
 
@@ -40,7 +52,7 @@ The included GitHub Actions workflow performs the same steps on a macOS runner a
 3. **Save needed work and quit Claude.** Close Desktop, Code sessions and editors running the Claude extension. Review the exact paths, then move them to Trash. Unexpected failures stop the batch and appear in Activity.
 4. **Optionally inspect Keychain.** Only recognized generic-password services in your login keychain are shown. Every deletion is selected and separately confirmed. Keychain entries are permanently deleted, not trashed. Deleting Safe Storage can make encrypted application data unreadable, including copies in Trash. Save/export needed work beforehand.
 5. **Finish Browser & settings.** Browser site data, extensions, custom launch scripts and project settings need manual review. A matching variable name may just be a comment. The app never edits those files.
-6. **Export Activity if needed.** The report contains file paths, action outcomes and service names, not token values or persistent Keychain references. It is otherwise kept only in memory. Keep recovery copies in Trash only as long as needed; they can contain credentials.
+6. **Export Activity if needed.** The report contains file paths, action outcomes, service names and account labels, not token values or persistent Keychain references. It is otherwise kept only in memory. Keep recovery copies in Trash only as long as needed; they can contain credentials.
 
 ## Coverage
 

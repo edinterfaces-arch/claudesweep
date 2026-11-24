@@ -22,7 +22,8 @@
 | Collisions | Two same-named files remain distinct and recoverable |
 | Links | A symlink inside a moved profile does not move its outside target |
 | Stale scan | Replaced files are rejected before cleanup |
-| Partial failure | Earlier successes are retained, the failure is reported, subsequent items are untouched |
+| Partial failure | Actual completed/failed/skipped states match disk and Keychain outcomes; later items are untouched |
+| Nested selection | A child covered by a moved parent is reported as skipped separately, with the parent relationship explained |
 | Permissions | A denied move is not recorded as a success |
 | Running Claude | A detected process blocks file and credential deletion |
 | Recovery collision | A recreated original is not overwritten |
