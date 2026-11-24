@@ -2,11 +2,11 @@
 
 A native macOS utility for reviewing and cleaning known local Claude Desktop and Claude Code data. SwiftUI, Foundation and Security.framework; no third-party packages, network requests, analytics, root helper or automatic startup.
 
-**Status: experimental native macOS build.** Apple Silicon compilation, all 14 core tests, DMG creation/mounting, copied-app signature verification and a five-second startup check passed on macOS 26 in GitHub Actions on 24 November 2026. Real cleanup, Keychain operations and UI interaction still need validation; see VALIDATION.md. The app is ad-hoc signed, without Developer ID signing or Apple notarization.
+**Status: experimental native macOS build.** The verification workflow exercises real Trash cleanup/recovery and disposable Keychain operations, then builds, mounts and launches the standalone app. See [VALIDATION.md](VALIDATION.md) for recorded results and [TESTING.md](TESTING.md) for isolation and limits. The app is ad-hoc signed, without Developer ID signing or Apple notarization.
 
 ## Download the built app
 
-Open the [verified build](https://github.com/edinterfaces-arch/claudesweep/actions/runs/45387891261) and download its `ClaudeSweep-macOS` artifact (GitHub sign-in may be required). Unzip it, open `ClaudeSweep-0.1.0-arm64.dmg`, and drag Claude Sweep to Applications. This build is for Apple Silicon Macs. Command Line Tools are only needed when building from source. Workflow artifacts have a limited retention period.
+Open the [verified build](https://github.com/edinterfaces-arch/claudesweep/actions/runs/45469983113) and download its `ClaudeSweep-macos-15-arm64` artifact (GitHub sign-in may be required). Unzip it, open `ClaudeSweep-0.1.1-arm64.dmg`, and drag Claude Sweep to Applications. This build is for Apple Silicon Macs. Command Line Tools are only needed when building from source. Workflow artifacts have a limited retention period.
 
 ## Build on your Mac
 
@@ -19,19 +19,19 @@ Requirements: macOS 13+, Xcode 15+ or Apple Command Line Tools providing Swift 5
 
 If the tools are missing, run `xcode-select --install`, finish Apple's installer, and retry. The build script uses an ad-hoc local signature. A distributable release requires a Developer ID signature and notarization, neither included here. Do not disable Gatekeeper or SIP to run this project.
 
-Alternatively, open `Package.swift` in Xcode, select the ClaudeSweep executable scheme and run. Tests use UUID-named temporary fixtures; they do not touch your real Claude data or Keychain. Build.command still builds the UI target as part of SwiftPM's test/build process.
+Alternatively, open `Package.swift` in Xcode, select the ClaudeSweep executable scheme and run. Core tests use UUID-named temporary fixtures. Native cleanup tests are opt-in and use synthetic profiles and separate disposable keychains; see [TESTING.md](TESTING.md). Build.command still builds the UI target as part of SwiftPM's test/build process.
 
 ## Create a DMG
 
 Double-click `Package-DMG.command`, or run `bash Package-DMG.command` in this folder on your Mac. It runs the tests, builds and ad-hoc signs the app, then creates and verifies a compressed disk image with an Applications shortcut. Finder reveals the result in `dist`:
 
-- Apple Silicon: `ClaudeSweep-0.1.0-arm64.dmg`
-- Intel: `ClaudeSweep-0.1.0-x86_64.dmg`
+- Apple Silicon: `ClaudeSweep-0.1.1-arm64.dmg`
+- Intel: `ClaudeSweep-0.1.1-x86_64.dmg`
 - A matching `.dmg.sha256` file records its SHA-256 checksum.
 
-Open the image, drag the app to Applications, and eject it. The build targets the Mac that runs the script; it is not a universal binary. A DMG is a container and does not add Developer ID signing or notarization. This prototype still needs cleanup and Keychain testing with disposable data before use on real data.
+Open the image, drag the app to Applications, and eject it. The build targets the Mac that runs the script; it is not a universal binary. A DMG is a container and does not add Developer ID signing or notarization. Disposable-data integration tests run before CI packaging. Interactive UI and login-keychain permission prompts still require manual validation.
 
-The included GitHub Actions workflow performs the same steps on a macOS runner and uploads the DMG and checksum as a workflow artifact. The macOS 26 Apple Silicon workflow has passed, including a mounted-image installation and startup check. Set `SWEEP_NO_REVEAL=1` to suppress Finder during automated builds.
+The included GitHub Actions workflow performs the same steps on a macOS runner and uploads the DMG and checksum as a workflow artifact. The workflow tests Apple Silicon on macOS 15 and 26, including a mounted-image installation and startup check. Set `SWEEP_NO_REVEAL=1` to suppress Finder during automated builds.
 
 ## Use
 
@@ -70,7 +70,7 @@ Existing CLI installations or extensions can recreate files on a later launch. U
 - Cleanup validates each candidate's device/inode/type and repeats the process check before each move. These are conservative checks, not an atomic lock against a hostile concurrent filesystem change. Do not run the cleaner while another process edits the targets.
 - A process check blocks known Claude executables, not all conceivable custom wrappers. It never force-kills an application. Stopping those apps remains the user's responsibility.
 - File sizes are logical estimates, not guaranteed reclaimable storage. Enumeration stops after 25,000 entries per target; partial totals are marked with ≥.
-- Keychain queries request metadata and persistent references, never `kSecReturnData`. Deletion revalidates the service/account and targets one selected persistent reference. OS access denial is surfaced.
+- Keychain queries request metadata and persistent references, never `kSecReturnData`. Deletion requires an unlocked keychain and revalidates service, account, creation and modification dates before targeting one selected persistent reference. Entries changed less than two seconds before the scan require waiting and rescanning. This is not an atomic lock against concurrent external changes. OS access denial is surfaced.
 - Do not grant broad permissions just to silence an error. Inspect inaccessible locations manually. No Full Disk Access, admin privileges or system-security changes are requested by the app.
 - Files and Keychain resets cannot be transacted together. Partial results remain visible; successful changes are not falsely rolled back in the UI.
 - Files can be recovered from Finder Trash while they remain there. There is no in-app undo, automatic backup or permanent recovery log.
